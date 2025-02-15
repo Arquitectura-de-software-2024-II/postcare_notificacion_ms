@@ -1,8 +1,6 @@
 using Microsoft.Extensions.Hosting;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
-using System.ComponentModel.DataAnnotations;
-using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 
@@ -15,9 +13,16 @@ public class Worker : BackgroundService
     public Worker(ILogger<Worker> logger, IHttpClientFactory httpClientFactory)
     {
         _logger = logger;
-        _factory = new ConnectionFactory { HostName = "localhost" }; // RabbitMQ
+        _factory = new ConnectionFactory {
+            HostName = Environment.GetEnvironmentVariable("RABBITMQ_IP")?? "localhost",
+            Port = 5672, 
+            UserName = Environment.GetEnvironmentVariable("RABBITMQ_USERNAME")?? "guest", // Usuario de RabbitMQ
+            Password = Environment.GetEnvironmentVariable("RABBITMQ_PASSWORD")?? "guest", // Contraseña de RabbitMQ
+            AutomaticRecoveryEnabled = true, // Habilitar reconexión automática
+            NetworkRecoveryInterval = TimeSpan.FromSeconds(10) // Intentar reconectar cada 10s
+        }; // RabbitMQ
 
-        var baseAddress = Environment.GetEnvironmentVariable("API_GATEWAY") 
+        var baseAddress = Environment.GetEnvironmentVariable("API_GATEWAY")
                                 ?? "http://localhost:8080"; // Default fallback;
         _httpClient = httpClientFactory.CreateClient();
         _httpClient.BaseAddress = new Uri(baseAddress); // Dirección del API Gateway (Nginx)
@@ -42,37 +47,37 @@ public class Worker : BackgroundService
             var message = Encoding.UTF8.GetString(body);
             _logger.LogInformation($"[x] Received message: {message}");
 
-            // Número de documento que viene en el mensaje
-            string numeroDocumento = message;
-
-
-            // Peticion para traer los contactos de emergencia
             try
             {
-                var request = new HttpRequestMessage(HttpMethod.Get, $"/auth/users/{numeroDocumento}/contacts"); //*****MODIFICAR POR ENDPOINT REAL*****
-                var response = await _httpClient.SendAsync(request, stoppingToken);
+                var data = JsonSerializer.Deserialize<Dictionary<string, string>>(message);
 
-                if (response.IsSuccessStatusCode)
+                if (data != null && data.ContainsKey("idPaciente") && data.ContainsKey("prioridad"))
                 {
-                    var responseBody = await response.Content.ReadAsStringAsync(stoppingToken);
+                    string idPaciente = data["idPaciente"];
+                    string prioridad = data["prioridad"];
 
-                    // Deserializar los números telefónicos con manejo de null
-                    var numerosTelefonicos = JsonSerializer.Deserialize<string[]>(responseBody)
-                                        ?? Array.Empty<string>();
+                    if (prioridad == "prioridad 1" || prioridad == "prioridad 2")
+                    {
+                        var request = new HttpRequestMessage(HttpMethod.Get, $"/auth/emergency-contact/{idPaciente}/");
+                        var response = await _httpClient.SendAsync(request, stoppingToken);
 
-                    _logger.LogInformation($"[x] Contactos obtenidos: {string.Join(", ", numerosTelefonicos)}");
-                    
-                    // Enviar SMS a los números obtenidos
-                    var smsSender = new SmsSender(_logger);
-                    string mensaje = $"¡Hola! Te informamos que el paciente con identificacion {numeroDocumento} ha reportado un sintoma tras su operacion en el hospital de la Universidad Nacional de Colombia.";
-                    await smsSender.SendSmsAsync(numerosTelefonicos, mensaje);
+                        if (response.IsSuccessStatusCode)
+                        {
+                            var responseBody = await response.Content.ReadAsStringAsync(stoppingToken);
+                            var numerosTelefonicos = JsonSerializer.Deserialize<string[]>(responseBody) ?? Array.Empty<string>();
+                            _logger.LogInformation($"[x] Contactos obtenidos: {string.Join(", ", numerosTelefonicos)}");
 
-                    _logger.LogInformation($"[x] Números telefónicos enviados: {string.Join(", ", numerosTelefonicos)}");
-                }
-                else
-                {
-                    _logger.LogWarning($"[!] Error al obtener contactos. Código de respuesta: {response.StatusCode}");
-                    return;
+                            var smsSender = new SmsSender(_logger);
+                            string mensaje = "¡Hola! Te informamos que recientemente se ha reportado un sintoma riesgoso tras la operacion de tu familiar en el hospital de la Universidad Nacional de Colombia.";
+                            await smsSender.SendSmsAsync(numerosTelefonicos, mensaje);
+                            _logger.LogInformation($"[x] Números telefónicos enviados: {string.Join(", ", numerosTelefonicos)}");
+                        }
+                        else
+                        {
+                            _logger.LogWarning($"[!] Error al obtener contactos. Código de respuesta: {response.StatusCode}");
+                            return;
+                        }
+                    }
                 }
             }
             catch (Exception ex)
@@ -80,10 +85,6 @@ public class Worker : BackgroundService
                 _logger.LogError($"[!] Error al realizar la petición HTTP: {ex.Message}");
                 return;
             }
-
-            //// ----Provisional mientras se crea el endpoint de traer contactos de emergencia----
-            //string[] numerosTelefonicos = ["+573142435418"];
-            //// ---------------------------------------------------------------------------------
 
             await Task.Delay(1000, stoppingToken);
         };
