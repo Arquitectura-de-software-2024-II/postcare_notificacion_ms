@@ -13,11 +13,12 @@ public class Worker : BackgroundService
     public Worker(ILogger<Worker> logger, IHttpClientFactory httpClientFactory)
     {
         _logger = logger;
-        _factory = new ConnectionFactory {
-            HostName = Environment.GetEnvironmentVariable("RABBITMQ_IP")?? "localhost",
-            Port = 5672, 
-            UserName = Environment.GetEnvironmentVariable("RABBITMQ_USERNAME")?? "guest", // Usuario de RabbitMQ
-            Password = Environment.GetEnvironmentVariable("RABBITMQ_PASSWORD")?? "guest", // Contraseña de RabbitMQ
+        _factory = new ConnectionFactory
+        {
+            HostName = Environment.GetEnvironmentVariable("RABBITMQ_IP") ?? "localhost",
+            Port = 5672,
+            UserName = Environment.GetEnvironmentVariable("RABBITMQ_USERNAME") ?? "guest", // Usuario de RabbitMQ
+            Password = Environment.GetEnvironmentVariable("RABBITMQ_PASSWORD") ?? "guest", // Contraseña de RabbitMQ
             AutomaticRecoveryEnabled = true, // Habilitar reconexión automática
             NetworkRecoveryInterval = TimeSpan.FromSeconds(10) // Intentar reconectar cada 10s
         }; // RabbitMQ
@@ -64,19 +65,29 @@ public class Worker : BackgroundService
                         if (response.IsSuccessStatusCode)
                         {
                             var responseBody = await response.Content.ReadAsStringAsync(stoppingToken);
-                            var numerosTelefonicos = JsonSerializer.Deserialize<string[]>(responseBody) ?? Array.Empty<string>();
-                            _logger.LogInformation($"[x] Contactos obtenidos: {string.Join(", ", numerosTelefonicos)}");
+                            var contacto = JsonSerializer.Deserialize<JsonElement>(responseBody);
+                            string numeroTelefonico = contacto.GetProperty("telefono").GetString() ?? string.Empty;
 
-                            var smsSender = new SmsSender(_logger);
-                            string mensaje = "¡Hola! Te informamos que recientemente se ha reportado un sintoma riesgoso tras la operacion de tu familiar en el hospital de la Universidad Nacional de Colombia.";
-                            await smsSender.SendSmsAsync(numerosTelefonicos, mensaje);
-                            _logger.LogInformation($"[x] Números telefónicos enviados: {string.Join(", ", numerosTelefonicos)}");
+                            if (!string.IsNullOrEmpty(numeroTelefonico))
+                            {
+                                _logger.LogInformation($"[x] Contacto obtenido: {numeroTelefonico}");
+
+                                var smsSender = new SmsSender(_logger);
+                                string mensaje = "¡Hola! Te informamos que recientemente se ha reportado un síntoma riesgoso tras la operación de tu familiar en el hospital de la Universidad Nacional de Colombia.";
+                                await smsSender.SendSmsAsync(numeroTelefonico, mensaje);
+                                _logger.LogInformation($"[x] Número telefónico enviado: {numeroTelefonico}");
+                            }
+                            else
+                            {
+                                _logger.LogWarning("[!] No se recibió un número de teléfono válido.");
+                            }
                         }
                         else
                         {
-                            _logger.LogWarning($"[!] Error al obtener contactos. Código de respuesta: {response.StatusCode}");
+                            _logger.LogWarning($"[!] Error al obtener contacto. Código de respuesta: {response.StatusCode}");
                             return;
                         }
+
                     }
                 }
             }

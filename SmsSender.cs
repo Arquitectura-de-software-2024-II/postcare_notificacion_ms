@@ -23,26 +23,23 @@ public class SmsSender
 
     }
 
-    public async Task SendSmsAsync(string[] phoneNumbers, string messageBody)
+    public async Task SendSmsAsync(string phoneNumber, string messageBody)
     {
         TwilioClient.Init(_accountSid, _authToken);
 
-        foreach (var phoneNumber in phoneNumbers)
+        try
         {
-            try
-            {
-                var message = await MessageResource.CreateAsync(
-                    to: new Twilio.Types.PhoneNumber(phoneNumber),
-                    from: new Twilio.Types.PhoneNumber(_twilioPhoneNumber),
-                    body: messageBody
-                );
+            var message = await MessageResource.CreateAsync(
+                to: new Twilio.Types.PhoneNumber(phoneNumber),
+                from: new Twilio.Types.PhoneNumber(_twilioPhoneNumber),
+                body: messageBody
+            );
 
-                _logger.LogInformation($"[x] SMS enviado a {phoneNumber}: {message.Sid}");
-            }
-            catch (ApiException ex)
-            {
-                _logger.LogError($"[!] Error al enviar SMS a {phoneNumber}: {ex.Message}");
-            }
+            _logger.LogInformation($"[x] SMS enviado a {phoneNumber}: {message.Sid}");
+        }
+        catch (ApiException ex)
+        {
+            _logger.LogError($"[!] Error al enviar SMS a {phoneNumber}: {ex.Message}");
         }
     }
 }
