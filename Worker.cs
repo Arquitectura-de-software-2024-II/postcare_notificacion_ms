@@ -23,8 +23,8 @@ public class Worker : BackgroundService
             NetworkRecoveryInterval = TimeSpan.FromSeconds(10) // Intentar reconectar cada 10s
         }; // RabbitMQ
 
-        var baseAddress = Environment.GetEnvironmentVariable("API_GATEWAY")
-                                ?? "http://localhost:8080"; // Default fallback;
+        var baseAddress = Environment.GetEnvironmentVariable("API_GATEWAY");
+                                //?? "http://localhost:8080"; // Default fallback;
         _httpClient = httpClientFactory.CreateClient();
         _httpClient.BaseAddress = new Uri(baseAddress); // Dirección del API Gateway (Nginx)
     }
@@ -37,7 +37,7 @@ public class Worker : BackgroundService
         using var connection = await _factory.CreateConnectionAsync();
         using var channel = await connection.CreateChannelAsync();
 
-        await channel.QueueDeclareAsync(queue: "hello", durable: false, exclusive: false, autoDelete: false, arguments: null);
+        await channel.QueueDeclareAsync(queue: "hello", durable: true, exclusive: false, autoDelete: false, arguments: null);
         _logger.LogInformation(" [*] Waiting for messages.");
 
         var consumer = new AsyncEventingBasicConsumer(channel);
